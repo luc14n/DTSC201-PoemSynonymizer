@@ -5,20 +5,24 @@ import queue
 from codecs import BOM_UTF16_BE
 
 from gui import create_gui
+from processer import processor
 
 def run_gui(in_queue, out_queue):
     root = create_gui(in_queue=in_queue, out_queue=out_queue)
     root.mainloop()
 
 def worker(in_queue, out_queue):
+    poem_processor = processor()
+
     while True:
         try:
             text = in_queue.get()  # block until available
             if text is None:
                 break  # sentinel to stop worker
-            # simulate processing
-            processed = text.upper()
+            print("Worker received {} for processing.".format(text))
+            processed = poem_processor.process(text)
             out_queue.put(processed)
+            print("Worker output {} for reading.".format(processed))
         except Exception:
             continue
 

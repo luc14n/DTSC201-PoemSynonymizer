@@ -1,5 +1,3 @@
-# python
-# gui.py
 import tkinter as tk
 from tkinter import font
 from ColoredButton import ColoredButton
