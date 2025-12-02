@@ -1,0 +1,98 @@
+# profanity_list.txt
+# One word per line, lowercase. Blank lines and lines starting with # are ignored by the GUI loader.
+
+# common expletives
+fuck
+fucks
+fucker
+fuckers
+fucking
+fucked
+motherfucker
+motherfuckers
+
+shit
+shits
+shitty
+shitting
+shitted
+
+damn
+damned
+
+hell
+
+# insults and crude terms
+bitch
+bitches
+bastard
+bastards
+asshole
+assholes
+ass
+asses
+douche
+douchebag
+prick
+pricks
+jerk
+jerks
+
+# sexual terms often filtered
+cock
+cocks
+dick
+dicks
+dickhead
+cum
+cums
+cumshot
+tits
+titties
+tit
+boob
+boobs
+booby
+pussy
+pussies
+cunt
+cunts
+whore
+whores
+slut
+sluts
+slutty
+escort
+
+# bodily functions / crude words
+piss
+pissed
+pissing
+spank
+spanked
+spanking
+vomit
+vomited
+vomiting
+crap
+
+# abbreviated/alternate spellings and leet variants
+fuk
+fuking
+sh1t
+shet
+fuq
+fukk
+fukker
+
+# mild profanity often included
+bloody
+bugger
+bollocks
+
+# phrases that sometimes appear as single words
+idiot
+moron
+dumbass
+dumba**
+# end of list

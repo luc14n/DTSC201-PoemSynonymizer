@@ -2,6 +2,17 @@ import tkinter as tk
 from tkinter import font
 from ColoredButton import ColoredButton
 import queue as _queue
+import re
+import os
+import traceback
+
+# Try to import better_profanity; fall back silently if unavailable
+try:
+    from better_profanity import profanity as _bp_profanity
+    _ADVANCED_PROFANITY_AVAILABLE = True
+except Exception:
+    _bp_profanity = None
+    _ADVANCED_PROFANITY_AVAILABLE = False
 
 def create_gui(in_queue=None, out_queue=None):
     root = tk.Tk()
@@ -9,17 +20,80 @@ def create_gui(in_queue=None, out_queue=None):
     root.geometry("900x500")
     root.minsize(600, 300)
 
-    # Colors (dark mode, renamed for clarity)
-    bg_color = "#0f1115"         # main window background
-    panel_color = "#15161a"      # panel / frame background
-    input_color = "#1b1d22"      # input Text background
-    output_color = "#111214"     # output Text background
-    text_color = "#e6eef8"       # primary text / foreground color
-    button_color = "#23262a"     # button background
-    accent_color = "#3A90FF"     # accent color (blue) for active/hover
-    accent_color_press = "#226fbd"  # accent color (blue) for active/hover
+    last_sent_text = None
+
+    # Colors (dark mode)
+    bg_color = "#0f1115"
+    panel_color = "#15161a"
+    input_color = "#1b1d22"
+    output_color = "#111214"
+    text_color = "#e6eef8"
+    button_color = "#23262a"
+    accent_color = "#3A90FF"
+    accent_color_press = "#226fbd"
 
     root.configure(bg=bg_color)
+
+    # helper: load profanity list from file or fallback to defaults
+    def _load_profanity_list():
+        default = {"damn", "hell", "shit", "fuck", "bitch", "asshole"}
+        try:
+            path = os.path.abspath("profanity_list.txt")
+            if os.path.exists(path):
+                words = []
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.split("#", 1)[0].strip().lower()
+                        if line:
+                            words.append(line)
+                return set(words) if words else default
+        except Exception:
+            pass
+        return default
+
+    PROFANITY_SET = _load_profanity_list()
+
+    # Prepare regex-based pattern (fallback)
+    PROFANITY_PATTERN = None
+    if PROFANITY_SET:
+        PROFANITY_PATTERN = re.compile(
+            r"\b(" + "|".join(re.escape(w) for w in sorted(PROFANITY_SET, key=len, reverse=True)) + r")\b",
+            flags=re.IGNORECASE,
+        )
+
+    def _mask_profane(match):
+        s = match.group(0)
+        return "".join("*" if c.isalpha() else c for c in s)
+
+    # If advanced library is available, preload custom list into it
+    if _ADVANCED_PROFANITY_AVAILABLE and _bp_profanity is not None:
+        try:
+            # better_profanity expects a list of words
+            _bp_profanity.load_censor_words(list(PROFANITY_SET))
+        except Exception:
+            # ignore loading errors and fall back to regex below when censoring
+            pass
+
+    def profanity_filter(text: str) -> str:
+        if not text:
+            return text
+
+        # Prefer advanced filter if available
+        if _ADVANCED_PROFANITY_AVAILABLE and _bp_profanity is not None:
+            try:
+                # use better_profanity.censor which will replace letters with '*'
+                return _bp_profanity.censor(text)
+            except Exception:
+                # fall through to regex fallback
+                pass
+
+        # Regex fallback: replace matched profane words with '*' for letters
+        if PROFANITY_PATTERN is None:
+            return text
+        try:
+            return PROFANITY_PATTERN.sub(_mask_profane, text)
+        except Exception:
+            return text
 
     # Layout frames
     left_frame = tk.Frame(root, bg=panel_color, padx=10, pady=10)
@@ -86,36 +160,84 @@ def create_gui(in_queue=None, out_queue=None):
     output_box.pack(fill="both", expand=True)
     output_scroll.config(command=output_box.yview)
 
-    # Generate button below input
-    def on_generate():
-        text = input_box.get("1.0", "end-1c")
-        if not text.strip():
-            output_box.config(state="normal")
-            output_box.delete("1.0", "end")
-            output_box.config(state="disabled")
-            return
-
-        def _send_with_retry(payload, attempt=0):
-            try:
+    # Define send-with-retry helper here so it's available whenever on_generate needs it
+    def _send_with_retry(payload, attempt=0):
+        try:
+            if in_queue is not None:
                 in_queue.put_nowait(payload)
-                # optionally provide quick feedback (flash or disable briefly)
+            # disable/enable the button if it exists; resolve at call time
+            try:
                 generate_btn.disable()
                 root.after(150, generate_btn.enable)
-            except _queue.Full:
-                # don't block main thread; retry with small backoff
-                if attempt < 6:
+            except Exception:
+                pass
+        except _queue.Full:
+            if attempt < 6:
+                try:
                     generate_btn.disable()
-                    delay_ms = 50 * (2 ** attempt)  # exponential backoff
-                    root.after(delay_ms, lambda: _send_with_retry(payload, attempt + 1))
-                else:
-                    # final fallback: re-enable button so user can try again
+                except Exception:
+                    pass
+                delay_ms = 50 * (2 ** attempt)
+                root.after(delay_ms, lambda: _send_with_retry(payload, attempt + 1))
+            else:
+                try:
                     generate_btn.enable()
+                except Exception:
+                    pass
+        except Exception:
+            # unexpected errors shouldn't crash the UI
+            traceback.print_exc()
 
-        if in_queue is not None:
-            _send_with_retry(text)
+    # Generate button below input
+    def on_generate(force=False):
+        nonlocal last_sent_text
+        try:
+            text = input_box.get("1.0", "end-1c")
+            normalized = text.strip()
+
+            # if empty, clear output and reset cache
+            if not normalized:
+                output_box.config(state="normal")
+                output_box.delete("1.0", "end")
+                output_box.config(state="disabled")
+                last_sent_text = None
+                return
+
+            # skip sending full request if unchanged; instead request a rebuild using existing words_type
+            if not force and normalized == last_sent_text:
+                if in_queue is not None:
+                    _send_with_retry({"_rebuild": True})
+                return
+
+            if in_queue is not None:
+                last_sent_text = normalized
+                _send_with_retry(text)
+        except Exception:
+            traceback.print_exc()
 
     btn_frame = tk.Frame(left_frame, bg=panel_color)
     btn_frame.pack(fill="x", pady=(8, 0))
+
+    # Profanity filter checkbox
+    prof_var = tk.BooleanVar(value=False)
+    prof_cb = tk.Checkbutton(
+        btn_frame,
+        text="Profanity filter",
+        variable=prof_var,
+        bg=panel_color,
+        fg=text_color,
+        selectcolor=panel_color,
+        activebackground=panel_color,
+        activeforeground=text_color,
+        highlightthickness=0,
+        bd=0,
+    )
+    prof_cb.pack(side="left", padx=(0, 8))
+
+    # Provide a small label if advanced filter is available
+    if _ADVANCED_PROFANITY_AVAILABLE:
+        adv_label = tk.Label(btn_frame, text="(advanced filter available)", bg=panel_color, fg="#9fb6ff")
+        adv_label.pack(side="left", padx=(0, 8))
 
     generate_btn = ColoredButton(
         btn_frame,
@@ -138,12 +260,18 @@ def create_gui(in_queue=None, out_queue=None):
             try:
                 while True:
                     processed = out_queue.get_nowait()
+                    # Apply profanity filter if enabled
+                    if prof_var.get():
+                        try:
+                            processed = profanity_filter(processed)
+                        except Exception:
+                            pass
+
                     output_box.config(state="normal")
                     output_box.delete("1.0", "end")
                     output_box.insert("1.0", processed)
                     output_box.config(state="disabled")
             except Exception:
-                # queue empty
                 pass
         root.after(100, poll_output)
 

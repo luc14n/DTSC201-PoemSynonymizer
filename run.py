@@ -19,10 +19,11 @@ def worker(in_queue, out_queue):
             text = in_queue.get()  # block until available
             if text is None:
                 break  # sentinel to stop worker
-            print("Worker received {} for processing.".format(text))
+            print(f"Worker received {text} for processing.")
+
             processed = poem_processor.process(text)
             out_queue.put(processed)
-            print("Worker output {} for reading.".format(processed))
+            print(f"Worker output {processed} for reading.")
         except Exception:
             continue
 
